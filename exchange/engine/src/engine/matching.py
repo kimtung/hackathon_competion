@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
+import time  # BUG-05 fix: dùng timestamp để sinh exec_id unique cho các reject path
+import itertools  # BUG-05 fix: counter unique cho reject exec_id
 
 from engine.config import ExchangeConfig, StockConfig
 from engine.models import (
@@ -24,10 +26,17 @@ class MatchingEngine:
         self.config = config or ExchangeConfig()
         self._books: dict[str, OrderBook] = {}
         self._trades: list[Trade] = []
+        # BUG-05 fix: counter cho reject exec_id để tránh trùng.
+        self._reject_counter = itertools.count(1)
 
         # Initialize order books for all configured stocks
         for symbol, stock_config in self.config.stocks.items():
             self._books[symbol] = OrderBook(stock_config)
+
+    def _next_reject_exec_id(self, tag: str) -> str:
+        # BUG-05 fix: reject exec_id unique (trước đây là chuỗi hằng
+        # "EXEC-REJ-MARKET-CLOSED" / "EXEC-REJ-UNKNOWN-SYM").
+        return f"EXEC-REJ-{tag}-{next(self._reject_counter)}"
 
     def submit_order(self, order: Order) -> MatchResult:
         """Submit an order to the engine. Returns match result with trades and exec reports."""
@@ -39,7 +48,7 @@ class MatchingEngine:
             result.exec_reports.append(ExecutionReport(
                 cl_ord_id=order.cl_ord_id,
                 order_id="",
-                exec_id="EXEC-REJ-MARKET-CLOSED",
+                exec_id=self._next_reject_exec_id("MARKET-CLOSED"),  # BUG-05 fix
                 exec_type=ExecType.REJECTED,
                 ord_status=OrdStatus.REJECTED,
                 symbol=order.symbol,
@@ -60,7 +69,7 @@ class MatchingEngine:
             result.exec_reports.append(ExecutionReport(
                 cl_ord_id=order.cl_ord_id,
                 order_id="",
-                exec_id="EXEC-REJ-UNKNOWN-SYM",
+                exec_id=self._next_reject_exec_id("UNKNOWN-SYM"),  # BUG-05 fix
                 exec_type=ExecType.REJECTED,
                 ord_status=OrdStatus.REJECTED,
                 symbol=order.symbol,
@@ -74,24 +83,41 @@ class MatchingEngine:
             ))
             return result
 
-        # Envelope guards: fail-fast on inputs that violate book invariants.
-        # These should never trip in production because upstream layers validate
-        # first; if they do, abort rather than risk a corrupt book.
+        # BUG-03 fix: KHÔNG dùng os._exit(1) vì input đến từ client — một lệnh xấu
+        # (price âm, qty ≤ 0, hoặc config degenerate) sẽ làm chết cả process sàn, gây DoS.
+        # Thay vào đó reject order và trả exec report REJECTED cho client.
+        envelope_err: str | None = None
         if order.price < 0:
-            sys.stderr.write(f"[engine] FATAL: negative price {order.price} for {order.symbol}\n")
-            sys.stderr.flush()
-            os._exit(1)
-        if order.quantity <= 0:
-            sys.stderr.write(f"[engine] FATAL: non-positive quantity {order.quantity} for {order.symbol}\n")
-            sys.stderr.flush()
-            os._exit(1)
-        if book.config.ceiling <= book.config.floor:
-            sys.stderr.write(
-                f"[engine] FATAL: degenerate price range for {order.symbol} "
-                f"(floor={book.config.floor}, ceiling={book.config.ceiling})\n"
+            envelope_err = f"Negative price: {order.price}"
+        elif order.quantity <= 0:
+            envelope_err = f"Non-positive quantity: {order.quantity}"
+        elif book.config.ceiling <= book.config.floor:
+            envelope_err = (
+                f"Degenerate price range for {order.symbol} "
+                f"(floor={book.config.floor}, ceiling={book.config.ceiling})"
             )
+
+        if envelope_err is not None:
+            sys.stderr.write(f"[engine] reject envelope: {envelope_err}\n")
             sys.stderr.flush()
-            os._exit(1)
+            order.reject()
+            # BUG-05 fix: exec_id duy nhất theo thời gian thay vì chuỗi hằng.
+            result.exec_reports.append(ExecutionReport(
+                cl_ord_id=order.cl_ord_id,
+                order_id="",
+                exec_id=f"EXEC-REJ-ENV-{int(time.time() * 1_000_000)}",
+                exec_type=ExecType.REJECTED,
+                ord_status=OrdStatus.REJECTED,
+                symbol=order.symbol,
+                side=order.side,
+                price=order.price,
+                quantity=order.quantity,
+                leaves_qty=0,
+                cum_qty=0,
+                avg_px=0.0,
+                reject_reason=envelope_err,
+            ))
+            return result
 
         # Route to the stock's order book
         result = book.process_order(order)

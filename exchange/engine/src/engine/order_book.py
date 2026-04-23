@@ -161,9 +161,14 @@ class OrderBook:
 
             queue = opposite[best_price]
             while incoming.leaves_qty > 0 and queue:
-                resting = queue[-1]
+                # BUG-01 fix: FIFO — khớp với resting order cũ nhất ở đầu queue,
+                # thay vì queue[-1] (LIFO, vi phạm time priority).
+                resting = queue[0]
                 fill_qty = min(incoming.leaves_qty, resting.leaves_qty)
-                fill_price = incoming.price if incoming.price else best_price
+                # BUG-02 fix + BUG-10 fix: giá khớp phải là giá của lệnh resting (maker),
+                # không phải giá của aggressor. Phân biệt MARKET theo ord_type thay vì
+                # dựa vào `incoming.price` truthy (vì LIMIT giá 0 về lý thuyết có thể hợp lệ).
+                fill_price = best_price
 
                 # Apply fills
                 incoming.fill(fill_qty, fill_price)
@@ -196,7 +201,9 @@ class OrderBook:
 
                 # Remove fully filled resting order
                 if resting.leaves_qty == 0:
-                    queue.pop()
+                    # BUG-01 fix: popleft() để remove đúng resting order đã được lấy
+                    # từ queue[0] (giữ FIFO). Trước đó dùng queue.pop() = remove cuối queue.
+                    queue.popleft()
 
             # Clean up empty price level
             if not queue:

@@ -52,6 +52,8 @@ class Order:
     leaves_qty: int = 0
     avg_px: float = 0.0
     timestamp: float = field(default_factory=time.time)
+    # BUG-06 fix: giữ tổng giá trị (int) để tránh tích lũy sai số float khi có nhiều fill.
+    _total_cost: int = 0
 
     def __post_init__(self) -> None:
         if self.leaves_qty == 0:
@@ -63,10 +65,13 @@ class Order:
 
     def fill(self, qty: int, price: int) -> None:
         """Apply a fill of `qty` at `price`."""
-        total_cost = self.avg_px * self.filled_qty + price * qty
+        # BUG-06 fix: trước đó total_cost = avg_px * filled_qty + price * qty — avg_px là
+        # kết quả chia trước đó (float), nhân ngược gây tích lũy rounding error qua nhiều fill.
+        # Giờ lưu _total_cost là integer (VND * qty), chỉ chia khi lấy avg_px.
+        self._total_cost += price * qty
         self.filled_qty += qty
         self.leaves_qty = self.quantity - self.filled_qty
-        self.avg_px = total_cost / self.filled_qty if self.filled_qty > 0 else 0.0
+        self.avg_px = self._total_cost / self.filled_qty if self.filled_qty > 0 else 0.0
         if self.leaves_qty == 0:
             self.status = OrdStatus.FILLED
         else:

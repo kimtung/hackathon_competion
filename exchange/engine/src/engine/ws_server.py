@@ -46,6 +46,9 @@ class ExchangeWSServer:
         self.host = host
         self.port = port
         self._clients: dict[ServerConnection, str] = {}  # ws -> client_id
+        # BUG-04 fix: map cl_ord_id → ws của owner để gửi exec report đúng người,
+        # không broadcast cho toàn bộ client (gây rò rỉ thông tin + duplicate UI).
+        self._order_owners: dict[str, ServerConnection] = {}
         self._client_counter = 0
         self._comm_logs: deque[CommLog] = deque(maxlen=max_logs)
         self._server: Server | None = None
@@ -138,6 +141,8 @@ class ExchangeWSServer:
                 price=price,
                 quantity=quantity,
             )
+            # BUG-04 fix: ghi nhớ ws owner của cl_ord_id để route exec report về đúng client.
+            self._order_owners[order.cl_ord_id] = ws
         except (KeyError, ValueError) as e:
             await self._send_json(ws, {
                 "type": "error",
@@ -177,14 +182,15 @@ class ExchangeWSServer:
                 "reject_reason": er.reject_reason,
             }
 
-            # Send to the ordering client
-            if er.cl_ord_id == order.cl_ord_id:
-                await self._send_json(ws, er_data)
-            else:
-                # This is a report for a resting order's owner
-                # In a real system we'd track which client owns which order
-                # For simplicity, broadcast fill reports for resting orders
-                await self._broadcast_json_all(er_data)
+            # BUG-04 fix: thay vì broadcast exec report của resting order cho toàn bộ client
+            # (rò rỉ cl_ord_id/account/qty và tạo duplicate ở UI aggressor), nay route chính
+            # xác tới ws của owner (tra `cl_ord_id → ws` trong `_order_owners`).
+            owner_ws = self._order_owners.get(er.cl_ord_id, ws)
+            try:
+                await self._send_json(owner_ws, er_data)
+            except Exception:
+                # owner_ws có thể đã disconnect — bỏ qua, không broadcast fallback.
+                pass
 
             fix_er_raw = fix_to_human(encode_execution_report(er))
             self._log("OUT", client_id, "execution_report",
@@ -253,6 +259,11 @@ class ExchangeWSServer:
                     })
         finally:
             del self._clients[ws]
+            # BUG-04 fix: dọn mapping owner khi client ngắt kết nối để tránh leak memory
+            # và tránh route exec report tới socket đã đóng.
+            stale = [cid for cid, owner in self._order_owners.items() if owner is ws]
+            for cid in stale:
+                del self._order_owners[cid]
             self._log("IN", client_id, "disconnect", "Client disconnected")
 
     async def start(self) -> Server:

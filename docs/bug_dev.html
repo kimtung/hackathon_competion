@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Stock Exchange — Bug Review (engine + client)</title>
+    <style>
+      :root {
+        --bg: #0f1220;
+        --fg: #e6e6f0;
+        --muted: #9aa0b4;
+        --card: #171a2e;
+        --accent: #7aa2ff;
+        --crit: #ff4757;
+        --high: #ff8a3d;
+        --med: #ffd43b;
+        --low: #4cd97b;
+        --code: #0b0e1c;
+        --border: #232745;
+      }
+      html { background: var(--bg); color: var(--fg); }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        max-width: 1100px; margin: 0 auto; padding: 24px;
+        line-height: 1.55;
+      }
+      h1 { margin-top: 0; }
+      h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 32px; }
+      .meta { color: var(--muted); margin-bottom: 12px; font-size: 14px; }
+      .bug {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin: 18px 0;
+      }
+      .bug.critical { border-left-color: var(--crit); }
+      .bug.high     { border-left-color: var(--high); }
+      .bug.medium   { border-left-color: var(--med); }
+      .bug.low      { border-left-color: var(--low); }
+      .bug h3 { margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px; }
+      .badge {
+        font-size: 11px; font-weight: 700; letter-spacing: .4px;
+        padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+      }
+      .badge.critical { background: var(--crit); color: white; }
+      .badge.high     { background: var(--high); color: #1a1a1a; }
+      .badge.medium   { background: var(--med);  color: #1a1a1a; }
+      .badge.low      { background: var(--low);  color: #1a1a1a; }
+      .meta-line { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+      .bug h4 { margin: 12px 0 4px 0; color: var(--accent); font-size: 14px; }
+      code {
+        font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+        background: var(--code); padding: 1px 6px; border-radius: 4px; font-size: 13px;
+      }
+      pre {
+        background: var(--code);
+        border: 1px solid var(--border);
+        padding: 12px 14px; border-radius: 6px;
+        overflow-x: auto; font-size: 13px; line-height: 1.45;
+      }
+      ol, ul { padding-left: 22px; }
+      ol li, ul li { margin: 2px 0; }
+      table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+      th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+      th { background: var(--card); }
+      .file-line { color: var(--muted); font-size: 12px; font-family: "JetBrains Mono", Menlo, monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>Stock Exchange — Dev Bug Review</h1>
+    <div class="meta">
+      Phạm vi: <code>exchange/engine</code> (Python + uv) &amp; <code>client</code> (React + Vite)<br/>
+      Góc nhìn: Senior Backend Engineer + Senior Frontend Engineer<br/>
+      Focus: matching correctness, state consistency, concurrency, edge cases.
+    </div>
+
+    <h2>Tóm tắt severity</h2>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Tên</th><th>Khu vực</th><th>Severity</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>BUG-01</td><td>LIFO thay vì FIFO tại cùng mức giá (time priority)</td><td>engine/order_book.py</td><td>Critical</td></tr>
+        <tr><td>BUG-02</td><td>Sai giá khớp — dùng giá aggressor thay vì giá resting</td><td>engine/order_book.py</td><td>Critical</td></tr>
+        <tr><td>BUG-03</td><td>Một order xấu có thể giết cả engine qua <code>os._exit(1)</code></td><td>engine/matching.py</td><td>Critical</td></tr>
+        <tr><td>BUG-04</td><td>Broadcast execution report cho tất cả client — rò rỉ thông tin / trùng lặp</td><td>engine/ws_server.py</td><td>High</td></tr>
+        <tr><td>BUG-05</td><td>Reject exec_id không unique (<code>EXEC-REJ-MARKET-CLOSED</code>…)</td><td>engine/matching.py</td><td>Medium</td></tr>
+        <tr><td>BUG-06</td><td>Sai số tích lũy của <code>avg_px</code> qua nhiều fill</td><td>engine/models.py</td><td>Medium</td></tr>
+        <tr><td>BUG-07</td><td><code>setInterval</code> auto-gen bị re-create mỗi lần snapshots đổi</td><td>client/OrderEntry.jsx</td><td>Medium</td></tr>
+        <tr><td>BUG-08</td><td>Reconnect: WebSocket <code>CONNECTING</code> không bị đóng khi unmount</td><td>client/useWebSocket.js</td><td>Low</td></tr>
+        <tr><td>BUG-09</td><td>Re-subscribe không reset local order book → stale level</td><td>client/useWebSocket.js</td><td>Medium</td></tr>
+        <tr><td>BUG-10</td><td>Market order (price=0) không được đẩy vào flow <code>fill_price</code> đúng khi incoming là LIMIT giá 0 hợp lệ</td><td>engine/order_book.py</td><td>Low</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ============ BUG 01 ============ -->
+    <section class="bug critical" id="bug-01">
+      <h3>BUG-01: LIFO thay vì FIFO tại cùng mức giá <span class="badge critical">critical</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/order_book.py — <code>_match()</code> dòng ~164, 199</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Khi khớp lệnh, code lấy resting order ở <b>cuối</b> queue (<code>queue[-1]</code>) và remove bằng
+        <code>queue.pop()</code>. Với <code>deque</code>, đây là thứ tự LIFO — lệnh đặt sau cùng lại được khớp trước.
+        Nguyên tắc sàn chứng khoán là FIFO (price-time priority): cùng mức giá thì lệnh đặt <b>trước</b> phải được ưu tiên khớp.
+        Đúng phải là <code>queue[0]</code> và <code>queue.popleft()</code>.
+      </p>
+      <pre><code>// HIỆN TẠI (sai — LIFO)
+resting = queue[-1]
+...
+if resting.leaves_qty == 0:
+    queue.pop()</code></pre>
+
+      <h4>Khi nào xảy ra</h4>
+      <p>Mọi khi ≥2 lệnh đối ứng đứng cùng một mức giá và có một lệnh aggressor đến khớp.</p>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>SELL-1 LIMIT 15000 qty=100 (đặt trước)</li>
+        <li>SELL-2 LIMIT 15000 qty=100 (đặt sau)</li>
+        <li>BUY LIMIT 15000 qty=100</li>
+        <li>Kỳ vọng: khớp với SELL-1. Thực tế: khớp với SELL-2.</li>
+      </ol>
+      <p>Xác nhận bằng test thất bại: <code>TestPriceTimePriority::test_time_priority_at_same_price</code>.</p>
+    </section>
+
+    <!-- ============ BUG 02 ============ -->
+    <section class="bug critical" id="bug-02">
+      <h3>BUG-02: Sai giá khớp — dùng giá của aggressor thay vì resting <span class="badge critical">critical</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/order_book.py — <code>_match()</code> dòng ~166</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        <code>fill_price = incoming.price if incoming.price else best_price</code>. Khi incoming là LIMIT có giá khác 0
+        (đa số trường hợp), fill_price luôn dùng giá của incoming (taker). Chuẩn matching engine: giá khớp phải là giá của
+        lệnh <b>resting</b> (maker) — điều đó tạo ra “price improvement” cho taker.
+      </p>
+      <p>
+        Hệ quả: Khi BUY LIMIT 16000 gặp SELL resting 15000, giao dịch sẽ thực hiện ở <b>16000</b>, khiến bên BÁN nhận
+        nhiều hơn kỳ vọng và taker trả nhiều hơn. Ngược lại SELL LIMIT 10000 khớp BUY resting 15000 sẽ khớp ở <b>10000</b>,
+        gây thiệt cho người bán so với mức giá 15000 thực tế đang được chào mua.
+      </p>
+
+      <h4>Khi nào xảy ra</h4>
+      <p>Mỗi lần aggressor là LIMIT và mức giá của nó khác với mức giá resting tốt nhất (cross bid/ask).</p>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>SELL LIMIT 15000 qty=100 → resting</li>
+        <li>BUY LIMIT 16000 qty=100 → khớp ngay</li>
+        <li>Kỳ vọng: giá khớp 15000. Thực tế: 16000.</li>
+      </ol>
+      <p>Test fail liên quan: <code>test_price_improvement</code>, <code>test_multiple_fills_across_levels</code>,
+      <code>test_price_priority_over_time</code>.</p>
+    </section>
+
+    <!-- ============ BUG 03 ============ -->
+    <section class="bug critical" id="bug-03">
+      <h3>BUG-03: Một lệnh xấu có thể giết cả engine (<code>os._exit(1)</code>) <span class="badge critical">critical</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/matching.py — <code>submit_order()</code> dòng ~80–94</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Các “envelope guards” dùng <code>os._exit(1)</code> khi thấy <code>price &lt; 0</code> hoặc <code>quantity &lt;= 0</code>.
+        Đầu vào đến từ client qua WebSocket, nên một client độc hại/lỗi gửi <code>price=-1</code> hay <code>quantity=0</code>
+        sẽ làm chết tiến trình engine — toàn bộ sàn dừng hoạt động cho mọi user. Đây là DoS nghiêm trọng.
+      </p>
+
+      <h4>Khi nào xảy ra</h4>
+      <p>Ngay khi bất kỳ WebSocket client nào gửi một order với giá âm hoặc số lượng ≤ 0.</p>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Client mở WS <code>ws://localhost:8765</code>.</li>
+        <li>Gửi <code>{"type":"new_order","cl_ord_id":"X","account":"A","symbol":"FPT","side":"BUY","ord_type":"LIMIT","price":-1,"quantity":100}</code></li>
+        <li>Engine process gọi <code>os._exit(1)</code> → cả admin API, WS server, matching đều chết.</li>
+      </ol>
+      <p>Đúng ra phải trả về REJECTED bằng exec report, không dừng tiến trình.</p>
+    </section>
+
+    <!-- ============ BUG 04 ============ -->
+    <section class="bug high" id="bug-04">
+      <h3>BUG-04: Exec report của resting order bị broadcast cho toàn bộ client <span class="badge high">high</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/ws_server.py — <code>_handle_new_order()</code> dòng ~181–187</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Khi có khớp, server gửi exec report của resting order bằng <code>_broadcast_json_all</code>. Client A (owner của resting) nhận được báo fill
+        — tốt; nhưng tất cả client khác cũng nhận được, gây (1) rò rỉ thông tin (thấy cl_ord_id, account, giá, khối lượng fill
+        của user khác) và (2) trùng lặp trong UI của aggressor (aggressor vốn đã được gửi exec report của chính họ, nay lại
+        thấy thêm report đối ứng).
+      </p>
+
+      <h4>Khi nào xảy ra</h4>
+      <p>Bất kỳ khớp nào giữa incoming và resting order thuộc client khác.</p>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Client A (WS) đặt SELL LIMIT 15000 qty=100 → nằm trên sổ.</li>
+        <li>Client B (WS, tab khác) đặt BUY LIMIT 15000 qty=100 → khớp.</li>
+        <li>Client B thấy exec report của chính mình + exec report của A trong UI (danh sách “Execution Reports”).</li>
+      </ol>
+      <p>Cần map <code>cl_ord_id → ws</code> hoặc <code>account → ws</code> để gửi đúng owner.</p>
+    </section>
+
+    <!-- ============ BUG 05 ============ -->
+    <section class="bug medium" id="bug-05">
+      <h3>BUG-05: exec_id trùng nhau cho reject-paths <span class="badge medium">medium</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/matching.py — dòng ~42, 63</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Hai nhánh reject ở matching engine set <code>exec_id</code> là chuỗi hằng:
+        <code>"EXEC-REJ-MARKET-CLOSED"</code> và <code>"EXEC-REJ-UNKNOWN-SYM"</code>. Spec FIX yêu cầu
+        <code>ExecID (17)</code> unique trên một session — nhiều lần reject sẽ có cùng exec_id, gây khó khăn cho audit/log.
+      </p>
+
+      <h4>Khi nào xảy ra</h4>
+      <ul>
+        <li>Client submit order khi market CLOSED ≥ 2 lần → 2 exec reports có cùng exec_id.</li>
+        <li>Client submit order với symbol lạ ≥ 2 lần → tương tự.</li>
+      </ul>
+    </section>
+
+    <!-- ============ BUG 06 ============ -->
+    <section class="bug medium" id="bug-06">
+      <h3>BUG-06: Tích lũy sai số float của <code>avg_px</code> <span class="badge medium">medium</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/models.py — <code>Order.fill()</code> dòng ~66–69</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        <code>total_cost = self.avg_px * self.filled_qty + price * qty</code> — <code>avg_px</code> là kết quả chia có rounding từ
+        bước trước. Tính lại tổng chi phí bằng cách nhân ngược sẽ tích lũy sai số sau mỗi fill. Với hàng nghìn fills,
+        chênh lệch có thể hiện ở exec report gửi cho người dùng.
+      </p>
+
+      <h4>Khi nào xảy ra</h4>
+      <p>Order bị khớp rải nhiều lần (partial fills), đặc biệt khi giá không chia hết cho số lượng.</p>
+
+      <h4>Khuyến nghị</h4>
+      <p>Lưu <code>_total_cost</code> (int VND × qty) và chỉ chia khi render <code>avg_px</code>.</p>
+    </section>
+
+    <!-- ============ BUG 07 ============ -->
+    <section class="bug medium" id="bug-07">
+      <h3>BUG-07: Auto-order <code>setInterval</code> bị re-create mỗi khi snapshots đổi <span class="badge medium">medium</span></h3>
+      <div class="meta-line">
+        <span class="file-line">client/src/components/OrderEntry.jsx — dòng ~70–77</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        <code>generateRandomOrder</code> là <code>useCallback</code> phụ thuộc vào <code>snapshots</code>. Mỗi message
+        <code>market_update</code>/<code>market_snapshot</code> đều update <code>snapshots</code> → identity của callback
+        thay đổi → <code>useEffect</code> chạy lại và <code>setInterval</code> được tạo mới. Khi auto đang bật, interval
+        bị tear-down/re-create rất thường xuyên → timer drift, mất nhịp (không đều <code>autoInterval</code>).
+      </p>
+
+      <h4>Khi nào xảy ra</h4>
+      <p>Bật Auto Order, để một lúc; đặc biệt rõ khi lưu lượng market data dày.</p>
+
+      <h4>Khuyến nghị</h4>
+      <p>Dùng ref (<code>generateRef</code>) lưu callback mới nhất, effect chỉ phụ thuộc <code>[autoGen, autoInterval]</code>,
+      bên trong interval gọi <code>generateRef.current()</code>.</p>
+    </section>
+
+    <!-- ============ BUG 08 ============ -->
+    <section class="bug low" id="bug-08">
+      <h3>BUG-08: Unmount không đóng socket <code>CONNECTING</code> <span class="badge low">low</span></h3>
+      <div class="meta-line">
+        <span class="file-line">client/src/hooks/useWebSocket.js — cleanup dòng ~120</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Cleanup chỉ <code>close()</code> khi <code>readyState === WebSocket.OPEN</code>. Nếu socket đang
+        <code>CONNECTING</code> lúc unmount, nó vẫn chạy nền; cờ <code>cancelled</code> chặn state update nhưng connection
+        vẫn tồn tại cho tới khi server hoặc trình duyệt reset.
+      </p>
+    </section>
+
+    <!-- ============ BUG 09 ============ -->
+    <section class="bug medium" id="bug-09">
+      <h3>BUG-09: Re-subscribe không reset local book → stale levels còn tồn tại <span class="badge medium">medium</span></h3>
+      <div class="meta-line">
+        <span class="file-line">client/src/hooks/useWebSocket.js — case <code>market_snapshot</code></span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Khi nhận snapshot mới, <code>orderBooks[symbol]</code> được thay bằng dữ liệu snapshot. Nhưng nếu trong lúc mất
+        kết nối có level giá thay đổi trên server, các level cũ còn trong state cho symbol đó bị ghi đè — đúng. Nhưng nếu
+        snapshot chỉ gửi về một subset symbol (tương lai), các symbol khác vẫn giữ state cũ.
+        Ngoài ra, <code>market_update</code> có thể tới trước snapshot full (race), gây thêm level phantom nếu snapshot đến sau ghi đè mất.
+      </p>
+      <p>
+        Hiện tại không reset <code>orderBooks</code> khi reconnect → UI có thể hiện level đã bị xóa bên server nhưng
+        client chưa được thông báo.
+      </p>
+
+      <h4>Khuyến nghị</h4>
+      <p>Khi mở lại WS: xóa <code>orderBooks</code> và <code>trades</code> trước khi chờ snapshot.</p>
+    </section>
+
+    <!-- ============ BUG 10 ============ -->
+    <section class="bug low" id="bug-10">
+      <h3>BUG-10: <code>fill_price</code> dùng <code>if incoming.price</code> — edge case giá 0 hợp pháp <span class="badge low">low</span></h3>
+      <div class="meta-line">
+        <span class="file-line">exchange/engine/src/engine/order_book.py — dòng ~166</span>
+      </div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Kiểm tra <code>incoming.price</code> (truthy) là cách gián tiếp để phân biệt MARKET (price=0) vs LIMIT. Hiện
+        <code>StockConfig.floor</code> đều &gt; 0 nên không phát sinh, nhưng nếu ngày nào đó admin cấu hình floor=0, một
+        LIMIT giá 0 hợp lệ sẽ bị nhầm là market order → lấy best_price. Nên check theo <code>ord_type</code>.
+      </p>
+    </section>
+
+    <h2>Chú thích</h2>
+    <p class="meta">
+      Những test hiện đang fail trên nhánh <code>main</code>:
+      <code>test_price_improvement</code>,
+      <code>test_multiple_fills_across_levels</code>,
+      <code>test_time_priority_at_same_price</code>,
+      <code>test_price_priority_over_time</code>. Các bug BUG-01, BUG-02 được xác nhận bằng chính các test này.
+    </p>
+  </body>
+</html>

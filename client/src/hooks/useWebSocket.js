@@ -41,6 +41,11 @@ export default function useWebSocket() {
         if (!cancelled) {
           setConnected(false);
           wsRef.current = null;
+          // BUG-09 fix: reset local book/trades khi mất kết nối để tránh hiển thị
+          // state cũ (ghost levels) khi server đã thay đổi trong lúc offline.
+          // Snapshot mới sẽ được gửi lại khi connect lại.
+          setOrderBooks({});
+          setTrades([]);
           clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
         }
@@ -117,7 +122,12 @@ export default function useWebSocket() {
         wsRef.current.onclose = null;
         wsRef.current.onerror = null;
         wsRef.current.onmessage = null;
-        if (wsRef.current.readyState === WebSocket.OPEN) {
+        // BUG-08 fix: đóng cả socket đang ở trạng thái CONNECTING (không chỉ OPEN)
+        // để tránh socket mồ côi tiếp tục mở sau khi component unmount.
+        if (
+          wsRef.current.readyState === WebSocket.OPEN ||
+          wsRef.current.readyState === WebSocket.CONNECTING
+        ) {
           wsRef.current.close();
         }
         wsRef.current = null;

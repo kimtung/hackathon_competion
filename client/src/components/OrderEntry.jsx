@@ -67,14 +67,22 @@ export default function OrderEntry({ sendOrder, execReports, snapshots }) {
     });
   }, [sendOrder, snapshots]);
 
+  // BUG-07 fix: generateRandomOrder có deps là `snapshots` → mỗi market update làm
+  // identity đổi → effect cũ restart setInterval rất nhiều lần gây drift/mất nhịp.
+  // Giữ latest callback trong ref, effect chỉ phụ thuộc [autoGen, autoInterval].
+  const generateRef = useRef(generateRandomOrder);
+  useEffect(() => {
+    generateRef.current = generateRandomOrder;
+  }, [generateRandomOrder]);
+
   useEffect(() => {
     if (autoGen) {
-      autoRef.current = setInterval(generateRandomOrder, autoInterval);
+      autoRef.current = setInterval(() => generateRef.current(), autoInterval);
     } else {
       clearInterval(autoRef.current);
     }
     return () => clearInterval(autoRef.current);
-  }, [autoGen, autoInterval, generateRandomOrder]);
+  }, [autoGen, autoInterval]);
 
   const recentReports = execReports.slice(0, 8);
 
