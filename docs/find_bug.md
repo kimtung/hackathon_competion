@@ -30,9 +30,9 @@ Important:
 - Assume some bugs are intentionally injected
 - Look for subtle issues, not obvious syntax errors
 
-Hãy liệt kê ra file docs/bug_dev.md, docs/bug_dev.html
+Hãy liệt kê ra file docs/bug_dev.html
 
-hãy fix các bug vừa tìm được (bug_dev.md), những thay đổi cần phải comment mã bug để biết tôi biết được đoạn thay đổi đó cho bug nào
+hãy fix các bug vừa tìm được (bug_dev.html), những thay đổi cần phải comment mã bug để biết tôi biết được đoạn thay đổi đó cho bug nào
 
 
 You are a QA engineer testing a stock exchange system.
@@ -64,8 +64,8 @@ Output:
 - kịch bản tái hiện (step-by-step orders)
 - Severity (low/medium/high/critical)
 
-Với mỗi bug tìm thấy hãy mô tả chi tiết, bao gồm các điều kiện gì kết hợp với nhau để sảy ra được và ghi vào docs/bug_qa.md, docs/bug_qa.html 
-hãy fix các bug vừa tìm được (bug_qa.md), những thay đổi cần phải comment mã bug để biết tôi biết được đoạn thay đổi đó cho bug nào
+Với mỗi bug tìm thấy hãy mô tả chi tiết, bao gồm các điều kiện gì kết hợp với nhau để sảy ra được và ghi vào  docs/bug_qa.html 
+hãy fix các bug vừa tìm được (bug_qa.html), những thay đổi cần phải comment mã bug để biết tôi biết được đoạn thay đổi đó cho bug nào
 
 
 3. You are a security engineer reviewing a stock exchange system with:
@@ -104,6 +104,6 @@ Output:
 - kịch bản  (step-by-step orders)
 - Severity, impact như thế nào (low/medium/high/critical)
 
-Với mỗi bug tìm thấy hãy mô tả chi tiết, bao gồm các điều kiện gì kết hợp với nhau để sảy ra được và ghi vào docs/bug_sec.md, docs/bug_sec.html 
+Với mỗi bug tìm thấy hãy mô tả chi tiết, bao gồm các điều kiện gì kết hợp với nhau để sảy ra được và ghi vào docs/bug_sec.html 
 
 
