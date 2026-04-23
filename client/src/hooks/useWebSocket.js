@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { publishTick } from "../lib/priceBus";
 
 const WS_URL = "ws://localhost:8765";
 const RECONNECT_DELAY = 2000;
@@ -101,6 +102,12 @@ export default function useWebSocket() {
             break;
 
           case "trade":
+            publishTick({
+              time: msg.time,
+              symbol: msg.symbol,
+              price: msg.price,
+              quantity: msg.quantity,
+            });
             setTrades((prev) => [msg, ...prev].slice(0, 200));
             break;
 

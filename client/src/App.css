@@ -313,6 +313,8 @@ td {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 .chart-header {
@@ -320,6 +322,13 @@ td {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  gap: 12px;
+}
+
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .chart-header select {
@@ -330,6 +339,75 @@ td {
   color: var(--text);
   font-family: inherit;
   font-size: 12px;
+}
+
+.chart-toggle {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.chart-toggle button {
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chart-toggle button:hover {
+  color: var(--text);
+}
+
+.chart-toggle button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.chart-hud {
+  display: flex;
+  gap: 20px;
+  padding: 8px 4px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hud-label {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.hud-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-value.up {
+  color: var(--buy);
+}
+
+.hud-value.down {
+  color: var(--sell);
+}
+
+.chart-container {
+  position: relative;
+  width: 100%;
+  height: 420px;
 }
 
 /* === Scrollbar === */
