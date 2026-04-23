@@ -45,6 +45,9 @@ export default function OrderEntry({ sendOrder, execReports, snapshots }) {
     const side = Math.random() > 0.5 ? "BUY" : "SELL";
     const snap = snapshots[symbol];
     if (!snap) return;
+    // BUG-QA-07 fix: không bắn lệnh nếu market đang CLOSED — trước đây auto-gen
+    // vẫn spam, server reject liên tục, UI tràn execution_reports.
+    if (snap.market_state !== "OPEN") return;
 
     const floor = snap.floor;
     const ceiling = snap.ceiling;

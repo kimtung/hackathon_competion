@@ -143,7 +143,11 @@ class ExchangeWSServer:
             )
             # BUG-04 fix: ghi nhớ ws owner của cl_ord_id để route exec report về đúng client.
             self._order_owners[order.cl_ord_id] = ws
-        except (KeyError, ValueError) as e:
+        # BUG-QA-03 fix: bổ sung TypeError, AttributeError. `int(None)` raise TypeError
+        # khi field JSON là null, `"abc".upper()` fine nhưng `int_val.upper()` raise
+        # AttributeError nếu symbol là number. Trước đây các lỗi này lọt qua handler,
+        # bubble lên async-for loop và đóng connection không thông báo.
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
             await self._send_json(ws, {
                 "type": "error",
                 "message": f"Invalid order: {e}",

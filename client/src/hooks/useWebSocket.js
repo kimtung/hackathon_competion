@@ -46,12 +46,18 @@ export default function useWebSocket() {
           // Snapshot mới sẽ được gửi lại khi connect lại.
           setOrderBooks({});
           setTrades([]);
+          // BUG-QA-08 fix: reset luôn execReports để user không bị lẫn lộn exec cũ
+          // (từ session trước) với exec mới sau khi reconnect.
+          setExecReports([]);
           clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
         }
       };
 
-      ws.onerror = () => {};
+      // BUG-QA-10 fix: log thay vì nuốt lỗi — hỗ trợ debug khi WS fail liên tục.
+      ws.onerror = (e) => {
+        console.warn("WebSocket error", e);
+      };
 
       ws.onmessage = (event) => {
         if (cancelled) return;

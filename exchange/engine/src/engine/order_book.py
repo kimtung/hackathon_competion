@@ -226,6 +226,30 @@ class OrderBook:
             book[order.price] = deque()
         book[order.price].append(order)
 
+    def purge_invalid_orders(self) -> list[Order]:
+        """Cancel và loại bỏ mọi resting order vi phạm config hiện tại.
+
+        BUG-QA-05 fix: khi admin đổi floor/ceiling/step, các lệnh resting cũ có thể
+        vi phạm config mới. Trả về danh sách các order đã hủy để caller phát exec
+        report CANCELLED và broadcast book_update.
+        """
+        cancelled: list[Order] = []
+        for book_side in (self._bids, self._asks):
+            for price in list(book_side.keys()):
+                queue = book_side[price]
+                survivors: deque[Order] = deque()
+                for order in queue:
+                    if self.validate_order(order) is None:
+                        survivors.append(order)
+                    else:
+                        order.cancel()
+                        cancelled.append(order)
+                if survivors:
+                    book_side[price] = survivors
+                else:
+                    del book_side[price]
+        return cancelled
+
     def _make_exec_report(
         self,
         order: Order,

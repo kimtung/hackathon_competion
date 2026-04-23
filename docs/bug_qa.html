@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Stock Exchange — QA Bug Report</title>
+    <style>
+      :root {
+        --bg: #0f1220;
+        --fg: #e6e6f0;
+        --muted: #9aa0b4;
+        --card: #171a2e;
+        --accent: #7aa2ff;
+        --crit: #ff4757;
+        --high: #ff8a3d;
+        --med: #ffd43b;
+        --low: #4cd97b;
+        --code: #0b0e1c;
+        --border: #232745;
+      }
+      html { background: var(--bg); color: var(--fg); }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        max-width: 1100px; margin: 0 auto; padding: 24px;
+        line-height: 1.55;
+      }
+      h1 { margin-top: 0; }
+      h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 32px; }
+      .meta { color: var(--muted); margin-bottom: 12px; font-size: 14px; }
+      .bug {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin: 18px 0;
+      }
+      .bug.critical { border-left-color: var(--crit); }
+      .bug.high     { border-left-color: var(--high); }
+      .bug.medium   { border-left-color: var(--med); }
+      .bug.low      { border-left-color: var(--low); }
+      .bug h3 { margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .badge {
+        font-size: 11px; font-weight: 700; letter-spacing: .4px;
+        padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+      }
+      .badge.critical { background: var(--crit); color: white; }
+      .badge.high     { background: var(--high); color: #1a1a1a; }
+      .badge.medium   { background: var(--med);  color: #1a1a1a; }
+      .badge.low      { background: var(--low);  color: #1a1a1a; }
+      .tag { background: #2a2f55; color: var(--fg); font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+      .tag.fixed  { background: #16694a; color: #bbf4db; }
+      .tag.report { background: #624016; color: #ffe1b3; }
+      .meta-line { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+      .bug h4 { margin: 12px 0 4px 0; color: var(--accent); font-size: 14px; }
+      code {
+        font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+        background: var(--code); padding: 1px 6px; border-radius: 4px; font-size: 13px;
+      }
+      pre {
+        background: var(--code);
+        border: 1px solid var(--border);
+        padding: 12px 14px; border-radius: 6px;
+        overflow-x: auto; font-size: 13px; line-height: 1.45;
+      }
+      ol, ul { padding-left: 22px; }
+      ol li, ul li { margin: 2px 0; }
+      table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+      th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+      th { background: var(--card); }
+      .file-line { color: var(--muted); font-size: 12px; font-family: "JetBrains Mono", Menlo, monospace; }
+      .row-conditions { margin: 8px 0; padding: 8px 10px; background: #0b0e1c; border-left: 3px solid var(--accent); border-radius: 4px; font-size: 13px; color: var(--muted);}
+      .row-conditions b { color: var(--fg); }
+    </style>
+  </head>
+  <body>
+    <h1>Stock Exchange — QA Bug Report</h1>
+    <div class="meta">
+      Vai trò: <b>QA engineer</b> — mục tiêu phá hệ thống và phát hiện bug ẩn.<br/>
+      Phạm vi: <code>exchange/engine</code> (Python + uv) &amp; <code>client</code> (React + Vite).<br/>
+      Focus: edge cases · sequence-based bugs · concurrency · rare conditions.<br/>
+      Báo cáo này viết trên trạng thái sau khi đã áp dụng các fix của <code>bug_dev.html</code>.
+    </div>
+
+    <h2>Phương pháp test</h2>
+    <ul>
+      <li><b>Edge cases</b>: qty cực lớn (10^18), price=0, cl_ord_id rỗng/trùng, field <code>null</code>, ký tự lạ trong symbol.</li>
+      <li><b>Sequence</b>: place → partial fill → re-submit same order; place → update config → existing resting còn hay hết.</li>
+      <li><b>Concurrency</b>: gửi song song từ 2 WS client cùng một thời điểm, cùng account match với chính mình.</li>
+      <li><b>Rare conditions</b>: admin đổi floor/ceiling/step trong khi có lệnh đang resting; spam 1000+ lệnh liên tục.</li>
+    </ul>
+
+    <h2>Tóm tắt</h2>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Tên</th><th>Khu vực</th><th>Severity</th><th>Trạng thái</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>BUG-QA-01</td><td>Self-trade (wash trade) không bị chặn</td><td>engine</td><td>Medium</td><td><span class="tag report">report only</span></td></tr>
+        <tr><td>BUG-QA-02</td><td>Duplicate <code>cl_ord_id</code> được accept lặng lẽ</td><td>engine</td><td>Medium</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-03</td><td>Field <code>null</code>/không phải số gây TypeError, ngắt connection</td><td>engine/ws_server</td><td>High</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-04</td><td>Không có rate-limit / max-orders trên WS</td><td>engine/ws_server</td><td>Medium</td><td><span class="tag report">report only</span></td></tr>
+        <tr><td>BUG-QA-05</td><td>Admin đổi config không hủy các lệnh resting đã vi phạm</td><td>engine/matching</td><td>Medium</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-06</td><td>Qty/price cực lớn bypass validation → mất chính xác ở UI JS</td><td>engine/config + client</td><td>Medium</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-07</td><td>Auto-gen tiếp tục gửi lệnh khi market CLOSED</td><td>client/OrderEntry</td><td>Low</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-08</td><td>Client <code>execReports</code> không bị reset khi reconnect</td><td>client/useWebSocket</td><td>Low</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-09</td><td>Không có API cancel/modify → không thể hoàn tất chuỗi place→partial→cancel→modify</td><td>engine (feature gap)</td><td>Medium</td><td><span class="tag report">report only</span></td></tr>
+        <tr><td>BUG-QA-10</td><td>WebSocket <code>onerror</code> nuốt lỗi không log</td><td>client/useWebSocket</td><td>Low</td><td><span class="tag fixed">fixed</span></td></tr>
+        <tr><td>BUG-QA-11</td><td>Re-submit cùng <code>Order</code> instance sau khi filled — idempotent kém</td><td>engine</td><td>Low</td><td><span class="tag report">report only</span></td></tr>
+      </tbody>
+    </table>
+
+    <!-- ========== BUG-QA-01 ========== -->
+    <section class="bug medium" id="bug-qa-01">
+      <h3>BUG-QA-01: Self-trade (wash trade) không bị chặn <span class="badge medium">medium</span> <span class="tag report">report only</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/order_book.py — <code>_match()</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Engine không kiểm tra <code>buy_order.account == sell_order.account</code> trước khi khớp. Một tài khoản có thể tự mua
+        tự bán, dẫn tới (1) phát sinh volume giả (wash trade), (2) tác động giá nhân tạo, (3) rủi ro tuân thủ. Nhiều sàn
+        thật triển khai STP (self-trade prevention): khi lệnh mới cross với lệnh của chính account đó, hủy một trong hai.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Cùng một <code>account</code> đặt cả BUY và SELL cross giá nhau (bất kể cl_ord_id khác).
+      </div>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Mở market.</li>
+        <li>Submit SELL LIMIT 55000 qty=100, <code>account="SAME"</code>.</li>
+        <li>Submit BUY LIMIT 55000 qty=100, <code>account="SAME"</code>.</li>
+        <li>Thực tế: sinh 1 trade giữa SAME↔SAME, tăng volume ảo. Kỳ vọng: một trong hai bị hủy (STP).</li>
+      </ol>
+
+      <h4>Vì sao để dạng report-only</h4>
+      <p>
+        Toàn bộ test suite hiện tại dùng cùng <code>account="ACC1"</code> cho cả hai phía
+        (<code>test_exact_match</code>, <code>test_fill_reports</code>, v.v.). Bật STP mặc định sẽ vi phạm kỳ vọng test.
+        Đề xuất: thêm flag <code>ExchangeConfig.prevent_self_trade</code> (default False) để bật tùy ngữ cảnh.
+      </p>
+
+      <h4>Đề xuất automation</h4>
+      <pre><code>async def test_stp_enabled():
+    engine.config.prevent_self_trade = True
+    engine.submit_order(make(account="A", side=SELL, ...))
+    r = engine.submit_order(make(account="A", side=BUY,  ...))
+    assert len(r.trades) == 0
+    assert any(er.exec_type == CANCELLED for er in r.exec_reports)</code></pre>
+    </section>
+
+    <!-- ========== BUG-QA-02 ========== -->
+    <section class="bug medium" id="bug-qa-02">
+      <h3>BUG-QA-02: Duplicate <code>cl_ord_id</code> được accept silent <span class="badge medium">medium</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/matching.py — <code>submit_order()</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        FIX spec yêu cầu <code>ClOrdID (11)</code> là unique trên một session. Engine hiện tại không tracking — gửi
+        2 order có cùng <code>cl_ord_id</code> đều được accept. Hệ quả: (1) audit trail bị nhầm lẫn,
+        (2) sau fix BUG-04, mapping <code>_order_owners[cl_ord_id]</code> bị ghi đè — exec report của lệnh thứ nhất
+        có thể bị gửi nhầm cho client thứ hai hoặc ngược lại.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> 2 message <code>new_order</code> với cùng <code>cl_ord_id</code> được submit, có thể cùng hoặc khác ws client.
+      </div>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Client A submit <code>{"cl_ord_id":"DUP1", "symbol":"FPT", "side":"BUY", "price":55000, "quantity":100}</code>.</li>
+        <li>Client B submit <code>{"cl_ord_id":"DUP1", "symbol":"FPT", "side":"SELL", "price":60000, "quantity":200}</code>.</li>
+        <li>Thực tế: cả hai NEW. Lệnh của A có thể khớp sau đó nhưng exec report lại được route tới B (ghi đè mapping).</li>
+      </ol>
+
+      <h4>Fix áp dụng</h4>
+      <p>
+        Giữ set <code>_seen_cl_ord_ids</code> (hoặc mapping) trong MatchingEngine. Nếu trùng → reject với reason
+        <code>Duplicate cl_ord_id</code> trước khi route tới book.
+      </p>
+    </section>
+
+    <!-- ========== BUG-QA-03 ========== -->
+    <section class="bug high" id="bug-qa-03">
+      <h3>BUG-QA-03: Field <code>null</code> hoặc không phải số gây TypeError, drop connection <span class="badge high">high</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/ws_server.py — <code>_handle_new_order()</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Handler bọc <code>try/except (KeyError, ValueError)</code> nhưng KHÔNG bắt <code>TypeError</code>. Khi client gửi
+        <code>"quantity": null</code> hoặc <code>"price": null</code>, <code>int(None)</code> raise
+        <code>TypeError</code>, bubble lên <code>_handle_client</code>'s async-for → kết thúc loop → connection đóng đột ngột
+        (không kèm error frame cho client).
+      </p>
+      <p>
+        Tương tự với <code>"symbol": 123</code> (number thay vì string) — <code>.upper()</code> raise
+        <code>AttributeError</code>, cũng không được bắt.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Client gửi JSON với field ép kiểu bị fail (không phải string/number), hoặc
+        <code>null</code> tại <code>quantity</code>/<code>price</code>/<code>symbol</code>.
+      </div>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Mở WS, gửi <code>{"type":"new_order","cl_ord_id":"X","symbol":"FPT","side":"BUY","ord_type":"LIMIT","price":55000,"quantity":null}</code>.</li>
+        <li>Kết quả: connection đóng không có thông báo, client phải reconnect.</li>
+      </ol>
+
+      <h4>Fix áp dụng</h4>
+      <p>Mở rộng <code>except</code> thành <code>(KeyError, ValueError, TypeError, AttributeError)</code> và trả về error frame.</p>
+    </section>
+
+    <!-- ========== BUG-QA-04 ========== -->
+    <section class="bug medium" id="bug-qa-04">
+      <h3>BUG-QA-04: Không có rate-limit / max-orders trên WS <span class="badge medium">medium</span> <span class="tag report">report only</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/ws_server.py</span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Một client duy nhất có thể gửi hàng ngàn order/giây. Mỗi order resting thêm vào <code>deque</code> trong book —
+        bộ nhớ tăng tuyến tính, <code>_trades</code> cũng unbounded. Client độc hại có thể DoS bằng cách spam lệnh hợp lệ
+        rồi không bao giờ cancel.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Attacker loop gửi new_order liên tục không delay.
+      </div>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Script Python gửi 100k order LIMIT giá rải đều trong floor–ceiling, qty hợp lệ.</li>
+        <li>Theo dõi RAM của engine process — tăng đều; latency cho client khác cũng tăng.</li>
+      </ol>
+
+      <h4>Đề xuất</h4>
+      <ul>
+        <li>Token bucket: mỗi client ≤ N message/s.</li>
+        <li>Cap <code>max_open_orders_per_account</code>.</li>
+        <li>Eviction policy cho <code>_trades</code> cũ (theo thời gian hoặc count).</li>
+      </ul>
+    </section>
+
+    <!-- ========== BUG-QA-05 ========== -->
+    <section class="bug medium" id="bug-qa-05">
+      <h3>BUG-QA-05: Đổi config không hủy các lệnh resting đã vi phạm <span class="badge medium">medium</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/matching.py — <code>update_stock_config()</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Admin hạ ceiling / nâng floor / đổi <code>price_step</code>/<code>qty_step</code> khi có lệnh đang resting. Lệnh cũ
+        vi phạm config mới vẫn nằm trên sổ và tiếp tục match — trạng thái sổ và config trở nên không nhất quán.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Có lệnh resting tại giá nằm ngoài [new_floor, new_ceiling] hoặc không align step mới, và admin gọi <code>PUT /api/stocks/{symbol}</code>.
+      </div>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Floor ACB=20000, ceiling=30000. Submit BUY LIMIT 22000 qty=100.</li>
+        <li>Admin gọi <code>PUT /api/stocks/ACB {"floor": 25000}</code>.</li>
+        <li>Thực tế: bid 22000 vẫn tồn tại, có thể khớp với SELL tới sau (SELL ở giá 22000 sẽ bị reject do dưới floor mới, nhưng SELL ở 25000 có thể vẫn cross với bid 22000 qua giá khớp best_price 22000 — dưới floor, vi phạm).</li>
+        <li>Kỳ vọng: lệnh 22000 phải bị hủy CANCELLED khi config đổi.</li>
+      </ol>
+
+      <h4>Fix áp dụng</h4>
+      <p>
+        Thêm <code>OrderBook.purge_invalid_orders()</code> trả về danh sách đã hủy; gọi trong
+        <code>MatchingEngine.update_stock_config()</code>. Các lệnh invalid được <code>cancel()</code>, log để observability.
+      </p>
+    </section>
+
+    <!-- ========== BUG-QA-06 ========== -->
+    <section class="bug medium" id="bug-qa-06">
+      <h3>BUG-QA-06: Quantity/price cực lớn bypass validation <span class="badge medium">medium</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/config.py — <code>validate_quantity()</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        <code>validate_quantity</code> chỉ check &gt; 0 và align step. Không có max cap. Có thể submit qty=<code>10^18</code>.
+        Python xử lý int tùy ý nhưng:
+      </p>
+      <ul>
+        <li>Frontend JS dùng <code>Number</code> (double 64-bit) → mất chính xác ở số &gt; <code>2^53 ≈ 9e15</code>.</li>
+        <li>JSON serialize <code>10^18</code> → số chính xác tại Python, nhưng parse trên JS sẽ rounding.</li>
+        <li>UI hiển thị sai, có thể tạo fill giả (nếu admin đổi ceiling rất lớn kết hợp).</li>
+      </ul>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Client gửi <code>quantity</code> hoặc <code>price</code> lớn hơn max an toàn.
+      </div>
+
+      <h4>Kịch bản tái hiện</h4>
+      <ol>
+        <li>Submit BUY LIMIT qty=<code>10**18</code> ở 55000 FPT — accept OK.</li>
+        <li>Client JS nhận message, <code>JSON.parse</code> ra <code>1e+18</code>, <code>toLocaleString()</code> mất chính xác.</li>
+      </ol>
+
+      <h4>Fix áp dụng</h4>
+      <p>Thêm <code>MAX_QUANTITY = 1_000_000_000</code> trong <code>StockConfig.validate_quantity()</code> và reject nếu vượt.</p>
+    </section>
+
+    <!-- ========== BUG-QA-07 ========== -->
+    <section class="bug low" id="bug-qa-07">
+      <h3>BUG-QA-07: Auto-gen vẫn gửi order khi market CLOSED <span class="badge low">low</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">client/src/components/OrderEntry.jsx — <code>generateRandomOrder</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Khi người dùng bật "Start Auto" nhưng market đang đóng, client vẫn bắn order — server reject hàng loạt,
+        spam cả <code>comm_logs</code> lẫn UI execution reports. Không có cảnh báo sớm cho user.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Admin chưa open market (hoặc đã close), user bật Auto Order.
+      </div>
+
+      <h4>Fix áp dụng</h4>
+      <p>
+        Trong <code>generateRandomOrder</code>, kiểm tra <code>snap.market_state === "OPEN"</code> trước khi gửi, nếu không thì
+        skip (vẫn tick interval nhưng no-op).
+      </p>
+    </section>
+
+    <!-- ========== BUG-QA-08 ========== -->
+    <section class="bug low" id="bug-qa-08">
+      <h3>BUG-QA-08: <code>execReports</code> không reset khi reconnect <span class="badge low">low</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">client/src/hooks/useWebSocket.js — <code>onclose</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Fix BUG-09 của dev report đã reset <code>orderBooks</code> &amp; <code>trades</code> khi <code>onclose</code>, nhưng
+        <code>execReports</code> thì không. User reconnect xong vẫn thấy exec reports cũ lẫn vào reports mới, khó phân biệt.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Client mất connection rồi reconnect trong khi state React vẫn còn (không refresh trang).
+      </div>
+
+      <h4>Fix áp dụng</h4>
+      <p>Thêm <code>setExecReports([])</code> trong <code>onclose</code>.</p>
+    </section>
+
+    <!-- ========== BUG-QA-09 ========== -->
+    <section class="bug medium" id="bug-qa-09">
+      <h3>BUG-QA-09: Không có API cancel/modify — sequence place→partial→cancel→modify không thể tái hiện <span class="badge medium">medium</span> <span class="tag report">report only</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine (feature gap)</span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Engine hỗ trợ <code>new_order</code> nhưng không có <code>cancel_order</code> (FIX <code>F</code>) hoặc
+        <code>order_cancel_replace</code> (FIX <code>G</code>). User bị partial fill không thể cancel phần resting, cũng không
+        thể modify giá/quantity. Trong một sàn thực tế đây là tính năng bắt buộc.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kích hoạt:</b> Bất kỳ lúc nào user muốn đổi ý về một lệnh đã resting.
+      </div>
+
+      <h4>Kịch bản mong đợi (hiện tại impossible)</h4>
+      <ol>
+        <li>Place BUY LIMIT 55000 qty=500.</li>
+        <li>Partial fill 200 → còn 300 resting.</li>
+        <li>Gửi cancel → không có endpoint. User phải tự đặt lệnh đối ứng để neutralize.</li>
+        <li>Modify (ví dụ hạ price xuống 54000) → không có endpoint.</li>
+      </ol>
+
+      <h4>Đề xuất automation</h4>
+      <pre><code>async def test_cancel_partial_fill():
+    # place BUY 500 @55000
+    # send matching SELL 200 @55000 → partial
+    await ws.send({"type":"cancel_order","cl_ord_id":"B1"})
+    er = await recv_json(ws)
+    assert er["exec_type"] == "CANCELLED"
+    assert er["leaves_qty"] == 0
+    assert er["cum_qty"] == 200  # preserved</code></pre>
+    </section>
+
+    <!-- ========== BUG-QA-10 ========== -->
+    <section class="bug low" id="bug-qa-10">
+      <h3>BUG-QA-10: <code>onerror</code> nuốt lỗi không log <span class="badge low">low</span> <span class="tag fixed">fixed</span></h3>
+      <div class="meta-line"><span class="file-line">client/src/hooks/useWebSocket.js — <code>ws.onerror = () =&gt; {}</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Callback rỗng khiến lỗi WS (DNS fail, TLS handshake fail, ICE disconnect) bị nuốt sạch. QA khó debug khi
+        reconnect liên tục thất bại.
+      </p>
+
+      <h4>Fix áp dụng</h4>
+      <p>Log <code>console.warn("WebSocket error", e)</code> để hỗ trợ điều tra.</p>
+    </section>
+
+    <!-- ========== BUG-QA-11 ========== -->
+    <section class="bug low" id="bug-qa-11">
+      <h3>BUG-QA-11: Re-submit cùng Order instance sau khi FILLED — idempotent kém <span class="badge low">low</span> <span class="tag report">report only</span></h3>
+      <div class="meta-line"><span class="file-line">exchange/engine/src/engine/order_book.py — <code>process_order()</code></span></div>
+
+      <h4>Mô tả</h4>
+      <p>
+        Nếu pháp trình sử dụng engine truyền cùng một <code>Order</code> object hai lần vào <code>submit_order</code>:
+        lần 2 gán <code>order_id</code> mới (tiêu tốn counter), validate lại, match-loop no-op do leaves_qty=0. Không có lỗi
+        hay báo, nhưng counter bị tiêu — tạo "ORD-X-N" skip số.
+      </p>
+
+      <h4>Đề xuất</h4>
+      <p>
+        Khi <code>order.status</code> đã ở trạng thái terminal (FILLED/CANCELLED/REJECTED) thì reject ngay với lý do
+        <code>Order already finalized</code>. Ít thật sự xảy ra trong production (vì order luôn được tạo mới từ message),
+        nhưng giúp phòng thủ ở API nội bộ.
+      </p>
+    </section>
+
+    <h2>Đề xuất automation tổng thể</h2>
+    <ul>
+      <li>Viết một bộ <code>tests/test_qa_edge.py</code> gom các case trên (<code>@pytest.mark.parametrize</code> qty=[0, -1, 10^18, 10^9+1], v.v.).</li>
+      <li>Thêm test async concurrency: dùng <code>asyncio.gather</code> để submit N order song song cùng <code>cl_ord_id</code>.</li>
+      <li>Thêm fuzz test JSON bằng <code>hypothesis</code>: sinh ngẫu nhiên payload để phát hiện những TypeError/AttributeError chưa cover.</li>
+      <li>E2E: Playwright mô phỏng 2 tab + admin close market giữa lúc auto-gen đang bật → verify UI không freeze, không spam reject vô hạn.</li>
+    </ul>
+
+    <h2>Ghi chú</h2>
+    <p class="meta">
+      Các bug fixed đều có comment trong mã nguồn dạng <code>// BUG-QA-NN fix:</code> / <code># BUG-QA-NN fix:</code> để dễ tra cứu và review.
+    </p>
+  </body>
+</html>

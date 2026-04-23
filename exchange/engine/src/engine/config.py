@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 from engine.models import MarketState
 
+# BUG-QA-06 fix: cap max quantity để đảm bảo giá trị vẫn < 2^53 khi serialize qua JSON tới JS.
+# 1e9 cổ phiếu là ngưỡng rộng rãi cho mọi case thực tế.
+MAX_QUANTITY: int = 1_000_000_000
+
 
 @dataclass
 class StockConfig:
@@ -29,6 +33,10 @@ class StockConfig:
         """Return error message if quantity is invalid, None if valid."""
         if quantity <= 0:
             return f"Quantity must be positive, got {quantity}"
+        # BUG-QA-06 fix: chặn qty cực lớn để tránh mất chính xác trên JS UI
+        # (Number precision cap ~2^53). 1e9 là ngưỡng thực tế rộng cho cổ phiếu.
+        if quantity > MAX_QUANTITY:
+            return f"Quantity {quantity} exceeds MAX_QUANTITY {MAX_QUANTITY}"
         if quantity % self.qty_step != 0:
             return f"Quantity {quantity} not aligned to step {self.qty_step}"
         return None
