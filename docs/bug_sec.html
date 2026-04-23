@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Stock Exchange — Security Review</title>
+    <style>
+      :root {
+        --bg: #0f1220;
+        --fg: #e6e6f0;
+        --muted: #9aa0b4;
+        --card: #171a2e;
+        --accent: #7aa2ff;
+        --crit: #ff4757;
+        --high: #ff8a3d;
+        --med: #ffd43b;
+        --low: #4cd97b;
+        --code: #0b0e1c;
+        --border: #232745;
+      }
+      html { background: var(--bg); color: var(--fg); }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        max-width: 1100px; margin: 0 auto; padding: 24px;
+        line-height: 1.55;
+      }
+      h1 { margin-top: 0; }
+      h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 32px; }
+      .meta { color: var(--muted); margin-bottom: 12px; font-size: 14px; }
+      .vuln {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin: 18px 0;
+      }
+      .vuln.critical { border-left-color: var(--crit); }
+      .vuln.high     { border-left-color: var(--high); }
+      .vuln.medium   { border-left-color: var(--med); }
+      .vuln.low      { border-left-color: var(--low); }
+      .vuln h3 { margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .badge {
+        font-size: 11px; font-weight: 700; letter-spacing: .4px;
+        padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+      }
+      .badge.critical { background: var(--crit); color: white; }
+      .badge.high     { background: var(--high); color: #1a1a1a; }
+      .badge.medium   { background: var(--med);  color: #1a1a1a; }
+      .badge.low      { background: var(--low);  color: #1a1a1a; }
+      .tag { background: #2a2f55; color: var(--fg); font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+      .meta-line { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+      .vuln h4 { margin: 12px 0 4px 0; color: var(--accent); font-size: 14px; }
+      code {
+        font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+        background: var(--code); padding: 1px 6px; border-radius: 4px; font-size: 13px;
+      }
+      pre {
+        background: var(--code);
+        border: 1px solid var(--border);
+        padding: 12px 14px; border-radius: 6px;
+        overflow-x: auto; font-size: 13px; line-height: 1.45;
+      }
+      ol, ul { padding-left: 22px; }
+      ol li, ul li { margin: 2px 0; }
+      table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+      th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+      th { background: var(--card); }
+      .file-line { color: var(--muted); font-size: 12px; font-family: "JetBrains Mono", Menlo, monospace; }
+      .row-conditions { margin: 8px 0; padding: 8px 10px; background: #0b0e1c; border-left: 3px solid var(--accent); border-radius: 4px; font-size: 13px; color: var(--muted);}
+      .row-conditions b { color: var(--fg); }
+      .impact {
+        margin: 8px 0; padding: 8px 10px; background: #2a1519; border-left: 3px solid var(--crit); border-radius: 4px; font-size: 13px;
+      }
+      .impact b { color: #ffaab1; }
+    </style>
+  </head>
+  <body>
+    <h1>Stock Exchange — Security Review</h1>
+    <div class="meta">
+      Vai trò: <b>Security Engineer</b> — phát hiện lỗ hổng bảo mật.<br/>
+      Phạm vi: <code>exchange/engine</code> (Python), <code>client</code> (React) &amp; <code>exchange/admin</code> (React).<br/>
+      Focus: Authorization · IDOR · Race conditions · Input validation · Privilege escalation.
+    </div>
+
+    <h2>Tóm tắt lỗ hổng</h2>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Tên</th><th>Loại</th><th>Severity</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>SEC-01</td><td>WS order entry không có xác thực</td><td>Auth bypass</td><td>Critical</td></tr>
+        <tr><td>SEC-02</td><td>Admin API không có xác thực (market start/stop, update stock)</td><td>Privilege escalation</td><td>Critical</td></tr>
+        <tr><td>SEC-03</td><td>Trường <code>account</code> bị giả mạo tự do</td><td>Authorization / Spoofing</td><td>Critical</td></tr>
+        <tr><td>SEC-04</td><td>Hijack <code>cl_ord_id</code> để chiếm execution report của người khác</td><td>IDOR</td><td>Critical</td></tr>
+        <tr><td>SEC-05</td><td>DoS thị trường: stop market / set config phi lý</td><td>Privilege escalation</td><td>Critical</td></tr>
+        <tr><td>SEC-06</td><td>Admin WebSocket <code>/ws/admin</code> không xác thực — full leak mọi state</td><td>Info disclosure</td><td>High</td></tr>
+        <tr><td>SEC-07</td><td>CORS <code>*</code> trên Admin API — CSRF-based privileged action từ trình duyệt</td><td>CSRF</td><td>High</td></tr>
+        <tr><td>SEC-08</td><td>Broadcast trade tiết lộ <code>cl_ord_id</code> của hai bên</td><td>Info disclosure</td><td>High</td></tr>
+        <tr><td>SEC-09</td><td><code>/api/logs</code> leak cl_ord_id/account/giá của mọi client</td><td>Info disclosure</td><td>High</td></tr>
+        <tr><td>SEC-10</td><td>Log injection qua <code>cl_ord_id</code> / <code>account</code> / <code>symbol</code></td><td>Log injection</td><td>Medium</td></tr>
+        <tr><td>SEC-11</td><td>Không có TLS — plaintext HTTP/WS</td><td>Transport</td><td>Medium</td></tr>
+        <tr><td>SEC-12</td><td>Không giới hạn kích thước/tốc độ message WS — DoS</td><td>DoS / Input validation</td><td>Medium</td></tr>
+        <tr><td>SEC-13</td><td>Admin API accept mọi giá trị <code>price_step</code>/<code>qty_step</code> &gt; 0 — config bất thường</td><td>Input validation</td><td>Medium</td></tr>
+        <tr><td>SEC-14</td><td>WebSocket không có heartbeat — dead connection giữ tài nguyên lâu</td><td>Resource</td><td>Low</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ========== SEC-01 ========== -->
+    <section class="vuln critical" id="sec-01">
+      <h3>SEC-01: Client WebSocket không có authentication <span class="badge critical">critical</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py — <code>_handle_client()</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        WebSocket server <code>ws://0.0.0.0:8765</code> nghe mọi kết nối tới. Không có token, session cookie, hay
+        handshake auth. Bất kỳ ai truy cập được mạng (public IP) đều có thể kết nối và submit lệnh ngay.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kết hợp để xảy ra:</b>
+        (1) Engine bind <code>0.0.0.0</code> (mặc định trong <code>main.py</code>) — lắng nghe mọi interface.
+        (2) Không có middleware/handshake check.
+        (3) Client JSON không mang bất kỳ credential nào.
+      </div>
+
+      <h4>Kịch bản khai thác (step-by-step)</h4>
+      <ol>
+        <li>Attacker biết host:port của engine (scan cổng hoặc từ thông tin public).</li>
+        <li>Mở kết nối: <code>wscat -c ws://victim.example:8765</code>.</li>
+        <li>Gửi ngay <code>{"type":"new_order","cl_ord_id":"EVIL-1","account":"ANYACC","symbol":"FPT","side":"BUY","ord_type":"LIMIT","price":55000,"quantity":100}</code>.</li>
+        <li>Lệnh được accept. Attacker không cần login.</li>
+      </ol>
+
+      <div class="impact">
+        <b>Impact:</b> Toàn bộ môi trường giao dịch public. Attacker có thể: (a) đặt lệnh spam để move price, (b) đặt
+        lệnh dưới tên người khác bằng spoof <code>account</code> (xem SEC-03), (c) dò info qua broadcast.
+      </div>
+
+      <h4>Remediation</h4>
+      <ul>
+        <li>Bắt buộc WS handshake token (JWT, API key) — validate trước khi thêm vào <code>_clients</code>.</li>
+        <li>Bind <code>127.0.0.1</code> mặc định, chỉ mở public khi có reverse proxy có auth.</li>
+      </ul>
+    </section>
+
+    <!-- ========== SEC-02 ========== -->
+    <section class="vuln critical" id="sec-02">
+      <h3>SEC-02: Admin API không có authentication <span class="badge critical">critical</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/api.py — tất cả route <code>/api/*</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Toàn bộ endpoint admin (<code>POST /api/market/start</code>, <code>POST /api/market/stop</code>,
+        <code>PUT /api/stocks/{symbol}</code>, <code>GET /api/logs</code>, <code>GET /api/clients</code>,
+        <code>GET /api/trades</code>, <code>GET /api/orderbook/{symbol}</code>) không có middleware xác thực. Ai mở được
+        port <code>8000</code> đều gọi được.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kết hợp:</b> FastAPI không mount auth dependency; bind <code>0.0.0.0:8000</code>; CORS <code>*</code>
+        cho phép browser cross-origin request.
+      </div>
+
+      <h4>Kịch bản khai thác</h4>
+      <ol>
+        <li>Attacker gửi: <code>curl -X POST http://victim:8000/api/market/stop</code> → toàn bộ sàn dừng, mọi order mới bị reject.</li>
+        <li>Hoặc: <code>curl -X PUT http://victim:8000/api/stocks/FPT -H "Content-Type: application/json" -d '{"ceiling": 10000}'</code> — hạ ceiling thấp hơn floor hiện tại (50000) →
+          lệnh chỉ có thể reject, và sau BUG-QA-05 fix, các lệnh resting bị purge toàn bộ.</li>
+        <li>Ngoài ra <code>GET /api/logs</code> trả về full communication log bao gồm <code>cl_ord_id</code> và <code>account</code>.</li>
+      </ol>
+
+      <div class="impact">
+        <b>Impact:</b> Attacker có full kiểm soát admin. Có thể (a) DoS thị trường, (b) tampering config để tạo lợi thế
+        cho các lệnh đã đặt trước, (c) đọc toàn bộ luồng giao dịch của mọi user (privacy breach), (d) reset engine state
+        bằng cách đổi floor/ceiling phi lý.
+      </div>
+
+      <h4>Remediation</h4>
+      <ul>
+        <li>Dùng FastAPI dependency <code>Depends(require_admin_token)</code>; ký JWT bằng secret server-side.</li>
+        <li>Tách <code>/api/*</code> vào private subnet hoặc đặt sau VPN.</li>
+        <li>Ghi audit log cho mọi hành động admin kèm principal.</li>
+      </ul>
+    </section>
+
+    <!-- ========== SEC-03 ========== -->
+    <section class="vuln critical" id="sec-03">
+      <h3>SEC-03: Trường <code>account</code> spoofable — giả danh user khác <span class="badge critical">critical</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py — <code>_handle_new_order</code> dòng 137</span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Order có trường <code>account: str</code>, được client tùy ý gán qua JSON. Server KHÔNG:
+        (1) map session/token → account, (2) whitelist account, (3) verify account thuộc về kết nối hiện tại.
+        Attacker gán <code>account</code> bằng bất kỳ chuỗi nào để giả danh user khác hoặc ngụy tạo volume.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kết hợp:</b> Không có auth (SEC-01) + field account là free string + engine ghi account vào trade/log.
+      </div>
+
+      <h4>Kịch bản khai thác</h4>
+      <ol>
+        <li>Attacker quan sát hệ thống log (ví dụ từ <code>/api/logs</code>) để biết format account của nạn nhân là <code>VIP-00123</code>.</li>
+        <li>Gửi <code>new_order</code> với <code>"account":"VIP-00123"</code>.</li>
+        <li>Lệnh được log / hiển thị / khớp dưới danh nghĩa VIP-00123.</li>
+        <li>Kết hợp với SEC-04 (hijack cl_ord_id), attacker có thể định tuyến confirmation của VIP-00123 về chính mình.</li>
+      </ol>
+
+      <div class="impact">
+        <b>Impact:</b> Giả mạo định danh → rủi ro tuân thủ (KYC/AML), tấn công có chủ đích nhằm vào một account để
+        manipulate volume/price mà đổ lỗi cho user khác, trách nhiệm pháp lý cho sàn.
+      </div>
+
+      <h4>Remediation</h4>
+      <p>
+        Khi WS client authenticate, gán server-side <code>account = auth_context.account</code>; bỏ field account khỏi
+        payload hoặc reject nếu khác với account của session.
+      </p>
+    </section>
+
+    <!-- ========== SEC-04 ========== -->
+    <section class="vuln critical" id="sec-04">
+      <h3>SEC-04: IDOR — Hijack <code>cl_ord_id</code> chiếm execution report <span class="badge critical">critical</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py — dòng 145 (<code>self._order_owners[order.cl_ord_id] = ws</code>)</span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Mapping <code>_order_owners[cl_ord_id] = ws</code> được set tại <b>dòng 145</b>, <b>TRƯỚC</b> khi
+        <code>engine.submit_order(order)</code> chạy validation. Bug-QA-02 fix (reject duplicate cl_ord_id) diễn ra
+        <i>bên trong</i> engine (<code>matching.py</code>), nhưng mapping trong <code>_order_owners</code> đã bị
+        <b>ghi đè</b> rồi.
+      </p>
+      <p>
+        Nghĩa là: nếu attacker đoán/thu thập được <code>cl_ord_id</code> của nạn nhân (thường có format dễ đoán, xem
+        <code>client/src/components/OrderEntry.jsx</code>: <code>${account}-${Date.now()}-${counter}</code>), attacker
+        submit ngay một order với cùng <code>cl_ord_id</code>. Engine reject (duplicate), nhưng từ giây phút đó exec
+        report liên quan <code>cl_ord_id</code> sẽ được gửi cho attacker thay vì victim.
+      </p>
+
+      <pre><code>// engine/src/engine/ws_server.py (trích)
+order = Order(cl_ord_id=data["cl_ord_id"], ...)
+self._order_owners[order.cl_ord_id] = ws   # &lt;-- ghi đè NGAY, trước khi submit
+...
+result = self.engine.submit_order(order)    # có thể reject duplicate, nhưng mapping đã bị poison</code></pre>
+
+      <div class="row-conditions">
+        <b>Điều kiện kết hợp:</b>
+        (1) SEC-01 no-auth cho phép attacker connect.
+        (2) <code>cl_ord_id</code> format dễ đoán ở client (<code>account-timestamp-counter</code>).
+        (3) Mapping owner được set trước khi validate (order của code).
+        (4) Sau BUG-04 fix, server route exec report dựa vào mapping này.
+      </div>
+
+      <h4>Kịch bản khai thác</h4>
+      <ol>
+        <li>Attacker kết nối và subscribe market.</li>
+        <li>Quan sát trade broadcast: thấy <code>buy_cl_ord_id = "ACC123-1713456789000-5"</code> (SEC-08 info leak).</li>
+        <li>Biết victim là ACC123, đoán counter tiếp theo 6/7/8, hoặc spam 100 giá trị có thể xảy ra.</li>
+        <li>Gửi new_order với <code>cl_ord_id="ACC123-1713456800000-6"</code>. Engine reject duplicate nếu trùng; nếu không trùng, mapping chứa attacker's ws.</li>
+        <li>Khi victim đặt lệnh thật với cl_ord_id đó → order được accept nhưng <code>_order_owners[...]</code> đã ánh xạ tới attacker. Exec report (NEW/TRADE/FILLED) đổ về attacker.</li>
+      </ol>
+      <p>
+        Biến thể: attacker poison <i>sau</i> victim đặt lệnh, bằng cách submit một order mới với cùng cl_ord_id —
+        engine reject duplicate, nhưng trước reject, dòng 145 đã ghi đè mapping → exec report tiếp theo (fill, cancel)
+        thuộc về victim bị route tới attacker.
+      </p>
+
+      <div class="impact">
+        <b>Impact:</b> Đọc được chi tiết giao dịch riêng tư của nạn nhân (giá khớp, volume, avg_px, timing), có thể
+        front-run theo data đó. Không làm mất tiền trực tiếp nhưng phá nguyên tắc market fairness và FIX audit trail.
+      </div>
+
+      <h4>Remediation</h4>
+      <ul>
+        <li>Chỉ set <code>_order_owners[cl_ord_id]</code> KHI engine chấp nhận order (sau <code>submit_order</code> và không REJECTED).</li>
+        <li>Không cho phép ghi đè: nếu cl_ord_id đã có owner khác → reject với <code>Duplicate cl_ord_id</code>.</li>
+        <li>Namespace hóa <code>cl_ord_id</code> theo authenticated account (<code>account:cl_ord_id</code>) để attacker không thể đụng namespace của user khác.</li>
+      </ul>
+    </section>
+
+    <!-- ========== SEC-05 ========== -->
+    <section class="vuln critical" id="sec-05">
+      <h3>SEC-05: DoS toàn sàn qua admin endpoint không xác thực <span class="badge critical">critical</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/api.py — <code>POST /api/market/stop</code>, <code>PUT /api/stocks/{symbol}</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Kết hợp SEC-02 (no auth) với các tác vụ privileged sẵn có: attacker có thể vô hiệu hóa toàn bộ hoạt động giao
+        dịch. Admin WS poll state mỗi 500ms — attacker có thể mở 1000 kết nối gây load CPU/bandwidth.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kết hợp:</b> SEC-02 + tài nguyên admin không rate-limit + không có observability alert cho stop/change.
+      </div>
+
+      <h4>Kịch bản khai thác</h4>
+      <ol>
+        <li>Attacker loop: <code>while true; do curl -X POST http://victim:8000/api/market/stop; sleep 0.1; done</code>.</li>
+        <li>Hoặc đổi <code>ceiling=1</code> cho mọi symbol → mọi lệnh mới reject, sau BUG-QA-05 fix mọi lệnh cũ bị purge.</li>
+      </ol>
+
+      <div class="impact">
+        <b>Impact:</b> Sàn chứng khoán ngừng hoạt động → thiệt hại tài chính lớn, uy tín, tuân thủ SLA.
+      </div>
+    </section>
+
+    <!-- ========== SEC-06 ========== -->
+    <section class="vuln high" id="sec-06">
+      <h3>SEC-06: Admin WebSocket <code>/ws/admin</code> không auth — full state leak <span class="badge high">high</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/api.py — <code>@app.websocket("/ws/admin")</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        <code>admin_websocket</code> chấp nhận mọi kết nối và push <code>_get_admin_state</code> mỗi 500ms. Payload bao
+        gồm: tất cả order book, tất cả trades (cl_ord_id, account qua logs), tất cả comm_logs (raw FIX), client_count.
+      </p>
+
+      <h4>Kịch bản</h4>
+      <pre><code>wscat -c ws://victim:8000/ws/admin
+# nhận stream JSON: { "books": {...}, "trades": [...], "logs": [...] } every 500ms</code></pre>
+
+      <div class="impact">
+        <b>Impact:</b> Bất kỳ ai có network access đều xem được ai đang giao dịch, giá nào, volume nào, toàn bộ log —
+        chẳng khác gì insider view. Vi phạm nghiêm trọng privacy và có thể giúp attacker trade theo.
+      </div>
+    </section>
+
+    <!-- ========== SEC-07 ========== -->
+    <section class="vuln high" id="sec-07">
+      <h3>SEC-07: CORS <code>allow_origins=["*"]</code> + no CSRF token <span class="badge high">high</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/api.py — middleware CORS</span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        CORS cho phép mọi origin kèm <code>allow_methods=["*"]</code>. Kết hợp với SEC-02 (no auth), một website malicious
+        có thể dùng JavaScript trong trình duyệt victim (admin) để gọi POST <code>/api/market/stop</code> hay PUT
+        <code>/api/stocks/...</code> — mặc dù admin nghĩ mình chỉ duyệt web bình thường.
+      </p>
+      <p>
+        Lưu ý: chỉ nguy hiểm thực sự khi có auth dựa cookie — hiện không có auth nên attacker gọi trực tiếp vẫn ok
+        (SEC-02). Khi implement auth bằng cookie, CORS này sẽ biến CSRF thành khả thi.
+      </p>
+
+      <h4>Kịch bản</h4>
+      <ol>
+        <li>Admin (đã login bằng cookie) mở trang <code>https://evil.example</code>.</li>
+        <li>Trang evil chạy <code>fetch("http://admin-host:8000/api/market/stop", {method:"POST", credentials:"include"})</code>.</li>
+        <li>Browser gửi request kèm cookie admin → hành động admin được thực thi.</li>
+      </ol>
+
+      <div class="impact">
+        <b>Impact:</b> CSRF privilege execution — khi cơ chế auth được thêm, CORS hiện tại làm vô hiệu cookie-SameSite
+        defaults.
+      </div>
+    </section>
+
+    <!-- ========== SEC-08 ========== -->
+    <section class="vuln high" id="sec-08">
+      <h3>SEC-08: Trade broadcast tiết lộ <code>cl_ord_id</code> của cả hai bên <span class="badge high">high</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py — <code>_handle_new_order</code> dòng 207–216</span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Khi có trade, server broadcast tới <b>tất cả</b> client gói <code>{"type":"trade", "buy_order_id":..., "sell_order_id":...}</code>.
+        Các <code>order_id</code> có định dạng <code>ORD-&lt;SYMBOL&gt;-&lt;counter&gt;</code> — có thể ghép nối với
+        <code>cl_ord_id</code> (qua log/admin WS) để truy ngược user.
+      </p>
+
+      <div class="row-conditions">
+        <b>Điều kiện kết hợp:</b> <code>_broadcast_json_all</code> không filter; định danh trong trade không phải
+        anonymous; SEC-06/SEC-09 cộng hưởng.
+      </div>
+
+      <h4>Impact</h4>
+      <div class="impact">
+        Attacker quan sát trade flow của mọi user, suy ra pattern giao dịch (whale watching).
+      </div>
+
+      <h4>Remediation</h4>
+      <p>Chỉ broadcast <code>trade_id</code>/<code>symbol</code>/<code>price</code>/<code>quantity</code>; bỏ order_id/cl_ord_id trong trade public feed.</p>
+    </section>
+
+    <!-- ========== SEC-09 ========== -->
+    <section class="vuln high" id="sec-09">
+      <h3>SEC-09: <code>GET /api/logs</code> trả thông tin riêng tư của mọi client <span class="badge high">high</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/api.py — <code>get_logs</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Comm log chứa <code>summary</code> (account, side, qty, price) và <code>fix_raw</code> (full FIX message). Kết
+        hợp SEC-02 (no auth), bất cứ ai cũng đọc được toàn bộ session của mọi user.
+      </p>
+
+      <h4>Impact</h4>
+      <div class="impact">
+        <b>Impact:</b> Data breach hoàn chỉnh: account, giá, volume, thời điểm. Vi phạm GDPR/PDPA/securities regulations.
+      </div>
+    </section>
+
+    <!-- ========== SEC-10 ========== -->
+    <section class="vuln medium" id="sec-10">
+      <h3>SEC-10: Log injection qua field do client cung cấp <span class="badge medium">medium</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py — <code>self._log(...)</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        <code>summary</code> được format từ dữ liệu client chưa sanitize:
+        <code>f"{order.side.value} {order.ord_type.value} {order.symbol} qty={order.quantity} px={order.price}"</code>.
+        <code>symbol</code> đã <code>.upper()</code> nhưng vẫn giữ ký tự đặc biệt; <code>cl_ord_id</code> được log trong
+        exec-report summary cũng không escape.
+      </p>
+      <p>
+        Nếu client gửi <code>cl_ord_id="X\n[ADMIN] market stopped"</code>, log (plain text) sẽ có 2 dòng, dòng 2 giả
+        là log admin. UI admin render qua React JSX nên XSS sẽ bị escape, nhưng file-log / SIEM có thể bị lẫn.
+      </p>
+
+      <h4>Kịch bản</h4>
+      <ol>
+        <li>Attacker gửi <code>new_order</code> với <code>cl_ord_id</code> chứa <code>\n</code> và giả bản ghi admin.</li>
+        <li>Chuyên viên đọc log thủ công bị lừa bởi dòng bơm vào.</li>
+      </ol>
+    </section>
+
+    <!-- ========== SEC-11 ========== -->
+    <section class="vuln medium" id="sec-11">
+      <h3>SEC-11: Không có TLS — plaintext HTTP/WS <span class="badge medium">medium</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/main.py — <code>uvicorn.run</code>, <code>websockets.serve</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Server start với <code>http://</code> và <code>ws://</code>. Attacker on-path (public WiFi, compromised AP, ISP)
+        sniff toàn bộ order payload và trade data, có thể modify order in-flight (nếu chưa có HMAC).
+      </p>
+
+      <h4>Remediation</h4>
+      <p>Đặt sau reverse proxy (nginx/Caddy) terminate TLS, hoặc chạy uvicorn với <code>--ssl-keyfile/--ssl-certfile</code>.</p>
+    </section>
+
+    <!-- ========== SEC-12 ========== -->
+    <section class="vuln medium" id="sec-12">
+      <h3>SEC-12: WebSocket không giới hạn kích thước/tốc độ message <span class="badge medium">medium</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py — <code>websockets.serve()</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        <code>websockets.serve(...)</code> không truyền <code>max_size</code> — mặc định ~1MB nhưng không rate-limit theo
+        client. Attacker có thể gửi message 1MB/message, 100 message/giây → dẫn tới (a) JSON parser tốn CPU, (b)
+        <code>_handle_new_order</code> coroutines stack lên, (c) RAM tăng.
+      </p>
+
+      <h4>Impact</h4>
+      <div class="impact">
+        DoS vừa phải, làm chậm toàn bộ client khác do event loop asyncio bận.
+      </div>
+    </section>
+
+    <!-- ========== SEC-13 ========== -->
+    <section class="vuln medium" id="sec-13">
+      <h3>SEC-13: Admin API accept mọi giá trị dương — config bất thường <span class="badge medium">medium</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/api.py — <code>StockConfigUpdate</code></span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Validator chỉ kiểm <code>&gt; 0</code>. Admin (hoặc attacker qua SEC-02) có thể set
+        <code>floor=1, ceiling=2^63, price_step=1, qty_step=1</code> — dải giá khổng lồ. Kết hợp với SEC-12,
+        attacker có thể mở order với giá cực lớn, gây tràn JS precision ở UI và log méo.
+      </p>
+
+      <h4>Remediation</h4>
+      <p>
+        Thêm <b>business bounds</b>: <code>ceiling/floor &lt;= 10^9</code>, <code>ceiling &gt; floor</code>,
+        <code>price_step</code> chia hết dải, <code>qty_step ≥ 1</code>.
+      </p>
+    </section>
+
+    <!-- ========== SEC-14 ========== -->
+    <section class="vuln low" id="sec-14">
+      <h3>SEC-14: WebSocket không có ping/pong heartbeat <span class="badge low">low</span></h3>
+      <div class="meta-line"><span class="file-line">engine/src/engine/ws_server.py</span></div>
+
+      <h4>Mô tả chi tiết</h4>
+      <p>
+        Connection "chết nửa đường" (half-open TCP) có thể tồn tại nhiều phút tới khi OS TCP keepalive kick in. Tài
+        nguyên (socket, entry trong <code>_clients</code>, <code>_order_owners</code>) giữ lâu.
+      </p>
+      <h4>Remediation</h4>
+      <p>Bật <code>websockets.serve(ping_interval=20, ping_timeout=10)</code>.</p>
+    </section>
+
+    <h2>Tấn công tổng hợp (chain)</h2>
+    <p>
+      Các lỗ hổng trên có thể kết hợp để tạo một đường tấn công trọn vẹn:
+    </p>
+    <ol>
+      <li><b>SEC-06</b>: mở <code>ws://victim:8000/ws/admin</code>, thu thập format <code>cl_ord_id</code>, <code>account</code> của mọi user.</li>
+      <li><b>SEC-03</b>: giả mạo account một user VIP khi đặt lệnh.</li>
+      <li><b>SEC-04</b>: poison <code>_order_owners</code> với cl_ord_id của victim → chiếm exec report.</li>
+      <li><b>SEC-02</b>: dùng <code>PUT /api/stocks/...</code> để thu hẹp dải giá, đẩy lệnh của competitor bị purge → giành ưu thế.</li>
+      <li><b>SEC-05</b>: nếu bị phát hiện, <code>POST /api/market/stop</code> để đóng băng market, cắt đường truy ngược.</li>
+    </ol>
+
+    <h2>Khuyến nghị ưu tiên</h2>
+    <ol>
+      <li><b>P0</b>: Triển khai authentication cho cả WS client và Admin API (JWT/API key). Bắt buộc server-side bind <code>account</code> từ session, không nhận từ payload.</li>
+      <li><b>P0</b>: Fix SEC-04 bằng cách <i>chỉ</i> ghi <code>_order_owners</code> sau khi engine accept; reject duplicate cl_ord_id ở tầng WS trước khi sửa state.</li>
+      <li><b>P1</b>: Bật TLS, giới hạn CORS theo whitelist origin, rate-limit WS/HTTP theo client/IP.</li>
+      <li><b>P1</b>: Ẩn <code>cl_ord_id</code>/<code>order_id</code> khỏi trade broadcast public; giới hạn <code>/api/logs</code> cho role admin; redaction các field nhạy cảm.</li>
+      <li><b>P2</b>: Input validation kỹ hơn cho config (bound thực tế), heartbeat WS.</li>
+    </ol>
+
+    <h2>Tham khảo OWASP</h2>
+    <ul>
+      <li><b>OWASP API Top 10:</b> API2 (Broken Authentication), API1 (BOLA/IDOR — SEC-04), API5 (Broken Function Level Authorization — SEC-02/05), API8 (Security Misconfiguration — SEC-07/11).</li>
+      <li><b>OWASP ASVS:</b> V2 Authentication, V4 Access Control, V5 Input Validation, V9 Communications.</li>
+    </ul>
+
+    <p class="meta">
+      Báo cáo này chỉ mô tả phát hiện; chưa kèm fix code. Có thể cung cấp patch ở vòng sau (JWT middleware, redaction layer, rate limiter).
+    </p>
+  </body>
+</html>
